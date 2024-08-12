@@ -102,7 +102,6 @@ class PowerSupplyController:
                 print(f"Connected to {selected_port}")
             except serial.SerialException as e:
                 print(f"Failed to connect to {selected_port}: {e}")
-                tk.messagebox.showerror("Connection Error", f"Failed to connect to {selected_port}\n{e}")
                 self.ser = None
 
     def send_command(self, command):
@@ -111,12 +110,16 @@ class PowerSupplyController:
             print(f"Sending command: {command}")
             self.ser.write((command + '\n').encode())
             response = self.ser.readline().decode().strip()
+
+            if response == "":
+                print("Received an empty response, ignoring.")
+                return None
+
             print(f"Received response: {response}")
             return response
         except Exception as e:
             print(f"Failed to send command: {command}, Error: {e}")
-            tk.messagebox.showerror("Communication Error", f"Failed to send command: {e}")
-            return ""
+            return None
 
     def set_voltage(self):
         try:
@@ -125,7 +128,6 @@ class PowerSupplyController:
             self.send_command(f"VOLT {voltage}")
         except ValueError as e:
             print(f"Failed to set voltage: {e}")
-            tk.messagebox.showerror("Input Error", "Invalid voltage value")
 
     def set_current(self):
         try:
@@ -134,26 +136,43 @@ class PowerSupplyController:
             self.send_command(f"CURR {current}")
         except ValueError as e:
             print(f"Failed to set current: {e}")
-            tk.messagebox.showerror("Input Error", "Invalid current value")
 
     def toggle_output(self):
         try:
             current_state = self.send_command("OUTP?")
+            if current_state is None:
+                return
+
             print(f"Current output state: {current_state}")
+
+            # Check if the response is valid
+            if current_state not in ["0", "1"]:
+                raise ValueError(f"Unexpected response: {current_state}")
+
             new_state = "OFF" if current_state == "1" else "ON"
             print(f"Toggling output to {new_state}")
             self.send_command(f"OUTP {new_state}")
+        except ValueError as e:
+            print(f"Invalid response for output state: {e}")
         except Exception as e:
             print(f"Failed to toggle output: {e}")
-            tk.messagebox.showerror("Output Error", f"Failed to toggle output: {e}")
 
     def update_status(self):
         while self.running:
             try:
                 print("Updating status...")
-                voltage = float(self.send_command("MEAS:VOLT?"))
-                current = float(self.send_command("MEAS:CURR?"))
-                power = float(self.send_command("MEAS:POW?"))
+                voltage = self.send_command("MEAS:VOLT?")
+                current = self.send_command("MEAS:CURR?")
+                power = self.send_command("MEAS:POW?")
+
+                # Ignore empty responses
+                if voltage is None or current is None or power is None:
+                    continue
+
+                # Convert responses to floats, with error checking
+                voltage = float(voltage) if voltage else 0.0
+                current = float(current) if current else 0.0
+                power = float(power) if power else 0.0
 
                 print(f"Measured Voltage: {voltage}, Current: {current}, Power: {power}")
 
@@ -175,9 +194,10 @@ class PowerSupplyController:
                 self.plot_data()
 
                 time.sleep(1)
+            except ValueError as e:
+                print(f"Failed to convert response to float: {e}")
             except Exception as e:
                 print(f"Failed to update status: {e}")
-                tk.messagebox.showerror("Update Error", f"Failed to update status: {e}")
                 self.running = False
 
     def plot_data(self):
@@ -191,6 +211,8 @@ class PowerSupplyController:
             self.ax[1].plot(self.time_data, self.current_data, label="Current (A)")
             self.ax[2].plot(self.time_data, self.power_data, label="Power (W)")
 
+            # Set y-axis limits
+            self.ax[0].set_ylim(0, 60)  # Voltage scale tops out at 60V
             self.ax[0].set_ylabel("Voltage (V)")
             self.ax[1].set_ylabel("Current (A)")
             self.ax[2].set_ylabel("Power (W)")
@@ -199,7 +221,6 @@ class PowerSupplyController:
             self.canvas.draw()
         except Exception as e:
             print(f"Failed to plot data: {e}")
-            tk.messagebox.showerror("Plotting Error", f"Failed to plot data: {e}")
 
     def close(self):
         print("Closing application...")
